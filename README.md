@@ -14,7 +14,7 @@ An extension of the [V3 Staker](https://github.com/Uniswap/v3-staker) made by un
 
 ### How to use
 
-These contracts expose a few new functions that allow for the enumeration of user deposits, and retrieve the total liquidity deposited in a given incentive. We can get the total number of deposits a user has made into this staker and then retrieve these deposits with the user address and a given index, up to the number of deposits. This function returns the V3 position token Id that has been deposited in the staker.
+These contracts expose a few new functions that allow for the enumeration of user deposits, and retrieve the total liquidity deposited in a given incentive. We can get the total number of deposits a user has made into this staker and then retrieve these deposits with the user address and a given index, up to the number of deposits. This function returns the V3 liquidity position nft token Id that has been deposited in the staker.
 
 ```
 function numDeposits(address)        public returns (uint);
