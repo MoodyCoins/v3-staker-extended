@@ -78,6 +78,6 @@ Clone this repository and run
 forge test --fork-url RPC_URL -vv
 ```
 
-where RPC_URL is some provider for a chain where uniswap v3 is valid and deployed, e.g. an infura provider url.
+where RPC_URL is some provider for a chain where uniswap v3 is valid and deployed, e.g. an infura provider url. You may have to set compiler optimizer to one million runs for it to compile.
 
 _Note: This contract has not been audited, use at your own risk._
