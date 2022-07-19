@@ -1,12 +1,16 @@
 ## V3 Staker Extended
 
-**Note:** This contract has not been audited, use at your own risk.
+###Deployments
+
+If you want to try using this contract it is deployed to the following places:
+
+```
+Rinkeby: 0xd0Cd2CF5fCc2E83B970Bb2f5Cea3332aFC3F6412
+```
 
 #### What is this?
 
-An extension of the [V3 Staker](https://github.com/Uniswap/v3-staker) made by uniswap. In the original contract, not enough information is exposed by the state variables to allow for the fetching of basic data on-chain. For example, simple acquisition of a given user's deposits is currently impossible. In some sort of emergency scenario where users are left with the chain as the only option for retrieving money, this is not optimal.
-
-I think aligning the v3-staker contract in line more with traditional staking contracts, where users can call and see their deposited balance, will make V3 staking a little more accessible.
+An extension of the [V3 Staker](https://github.com/Uniswap/v3-staker) made by uniswap. In the original contract, not enough information is exposed on-chain to allow for the fetching of basic data. E.g. simple acquisition of a given user's deposits is impossible. In an emergency scenario where users must use the chain to retrieve assets, this is not optimal. This also makes it easier on developers who want to implement v3 staking but don't want to use an indexer.
 
 #### How to use
 
@@ -75,3 +79,5 @@ forge test --fork-url RPC_URL -vv
 ```
 
 where RPC_URL is some provider for a chain where uniswap v3 is valid and deployed, e.g. an infura provider url.
+
+_Note: This contract has not been audited, use at your own risk._
