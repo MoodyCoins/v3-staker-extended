@@ -4,7 +4,7 @@
 
 If you want to try using this contract it is deployed to the following places:
 
-```
+```solidity
 Rinkeby: 0xd0Cd2CF5fCc2E83B970Bb2f5Cea3332aFC3F6412
 ```
 
