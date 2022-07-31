@@ -98,7 +98,7 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
     mapping(IERC20Minimal => mapping(address => uint256)) public override rewards;
 
     // NEW: An incentive was altered
-    event IncentiveAltered(bytes32 indexed incentiveId, uint256 change, bool positive);
+    event IncentiveAltered(bytes32 indexed incentiveId, uint256 change, bool increase);
 
     /// @param _factory the Uniswap V3 factory
     /// @param _nonfungiblePositionManager the NFT position manager contract address
@@ -157,6 +157,7 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
         );
     }
 
+    // TODO: test
     // NEW: Alter the unclaimed rewards in an incentive
     /// @dev Warning: this will alter unclaimed stakes by the proportional percentage you change
     /// totalRewardUnclaimed
@@ -184,6 +185,8 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
 
         if (!increase)
             TransferHelperExtended.safeTransfer(address(key.rewardToken), key.refundee, change);
+
+        emit IncentiveAltered(incentiveId, change, increase);
     }
 
     /// @inheritdoc IUniswapV3Staker
