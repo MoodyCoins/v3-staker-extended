@@ -19,8 +19,11 @@ import '@uniswap/v3-core/contracts/interfaces/IERC20Minimal.sol';
 import '@uniswap/v3-periphery/contracts/interfaces/INonfungiblePositionManager.sol';
 import '@uniswap/v3-periphery/contracts/base/Multicall.sol';
 
+// NEW: contract is ownable to allow for extra functionality
+import '@openzeppelin/contracts/access/Ownable.sol';
+
 /// @title Extended Uniswap V3 staking interface
-contract V3StakerExtended is IUniswapV3Staker, Multicall {
+contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
     /// @notice Represents a staking incentive
     struct Incentive {
         uint256 totalRewardUnclaimed;
@@ -67,10 +70,10 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall {
     mapping(address => uint256) public numDeposits;
     mapping(uint256 => uint256) private _userDepositsIndex;
 
-   function userDeposits(address user, uint256 index) public view returns (uint256 tokenId) {
-       require(index < numDeposits[user], "UniswapV3StakerExtended: index OOB");
-       return _userDeposits[user][index];
-   }
+    function userDeposits(address user, uint256 index) public view returns (uint256 tokenId) {
+        require(index < numDeposits[user], 'UniswapV3StakerExtended: index OOB');
+        return _userDeposits[user][index];
+    }
 
     // NEW: used for tracking an incentives total liquidity
     mapping(bytes32 => uint256) public incentiveLiquidity;
@@ -94,6 +97,9 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall {
     /// @inheritdoc IUniswapV3Staker
     mapping(IERC20Minimal => mapping(address => uint256)) public override rewards;
 
+    // NEW: An incentive was altered
+    event IncentiveAltered(bytes32 indexed incentiveId, uint256 change, bool positive);
+
     /// @param _factory the Uniswap V3 factory
     /// @param _nonfungiblePositionManager the NFT position manager contract address
     /// @param _maxIncentiveStartLeadTime the max duration of an incentive in seconds
@@ -111,7 +117,7 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall {
     }
 
     /// @inheritdoc IUniswapV3Staker
-    function createIncentive(IncentiveKey memory key, uint256 reward) external override {
+    function createIncentive(IncentiveKey memory key, uint256 reward) external override onlyOwner {
         require(reward > 0, 'UniswapV3Staker::createIncentive: reward must be positive');
         require(
             block.timestamp <= key.startTime,
@@ -151,8 +157,42 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall {
         );
     }
 
+    // NEW: Alter the unclaimed rewards in an incentive
+    /// @dev Warning: this will alter unclaimed stakes by the proportional percentage you change
+    /// totalRewardUnclaimed
+    function alterIncentive(
+        IncentiveKey memory key,
+        uint256 change,
+        bool increase
+    ) external onlyOwner {
+        bytes32 incentiveId = IncentiveId.compute(key);
+        Incentive storage incentive = incentives[incentiveId];
+
+        if (increase)
+            TransferHelperExtended.safeTransferFrom(
+                address(key.rewardToken),
+                msg.sender,
+                address(this),
+                change
+            );
+
+        uint256 unclaimed = incentive.totalRewardUnclaimed;
+        if (!increase) {
+            require(unclaimed > change, 'UniswapV3Staker::alterIncentive: too much');
+            incentive.totalRewardUnclaimed -= change;
+        } else incentive.totalRewardUnclaimed += change;
+
+        if (!increase)
+            TransferHelperExtended.safeTransfer(address(key.rewardToken), key.refundee, change);
+    }
+
     /// @inheritdoc IUniswapV3Staker
-    function endIncentive(IncentiveKey memory key) external override returns (uint256 refund) {
+    function endIncentive(IncentiveKey memory key)
+        external
+        override
+        onlyOwner
+        returns (uint256 refund)
+    {
         require(
             block.timestamp >= key.endTime,
             'UniswapV3Staker::endIncentive: cannot end incentive before end time'
