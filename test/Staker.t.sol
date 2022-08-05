@@ -36,7 +36,7 @@ contract V3StakerExtendedTest is Test {
         return this.onERC721Received.selector;
     }
 
-    function _mint() private returns (uint) {
+    function _mint() private returns (uint256) {
         delete multicallPayload;
         // arbitrary params, could be anything, all we care about is a new mint occurs
         INonfungiblePositionManager.MintParams memory defaultParams = INonfungiblePositionManager
@@ -44,9 +44,9 @@ contract V3StakerExtendedTest is Test {
                 wbtc,
                 weth,
                 3000,
-                256980,
-                258540,
-                1000000,
+                253500,
+                259980,
+                1 ether,
                 1 ether,
                 0,
                 0,
@@ -55,9 +55,9 @@ contract V3StakerExtendedTest is Test {
             );
         bytes memory mintPayload = abi.encodeWithSelector(nftManager.mint.selector, defaultParams);
         multicallPayload.push(mintPayload);
-        multicallPayload.push(abi.encodeWithSelector(nftManager.refundETH.selector, new bytes(0))); // refundETH()
-        bytes[] memory res = nftManager.multicall{value: 1000 ether}(multicallPayload);
-        (uint id, , , ) = abi.decode(res[0], (uint256, uint128, uint256, uint256));
+        //multicallPayload.push(abi.encodeWithSelector(nftManager.refundETH.selector, new bytes(0))); // refundETH()
+        bytes[] memory res = nftManager.multicall(multicallPayload);
+        (uint256 id, , , ) = abi.decode(res[0], (uint256, uint128, uint256, uint256));
         return id;
     }
 
@@ -67,8 +67,8 @@ contract V3StakerExtendedTest is Test {
         nftManager = NonfungiblePositionManager(0xC36442b4a4522E871399CD717aBDD847Ab11FE88);
         staker = new V3StakerExtended(factory, nftManager, 2592000, 63072000); // same as official staker
         pool = IUniswapV3Pool(factory.getPool(wbtc, weth, 3000));
-        deal(wbtc, me, MAX_UINT);
-        deal(me, MAX_UINT);
+        deal(wbtc, me, 10000 ether);
+        deal(weth, me, 10000 ether);
         WETH.approve(address(nftManager), MAX_UINT);
         BTC.approve(address(nftManager), MAX_UINT);
         tokenId = _mint();
@@ -85,7 +85,7 @@ contract V3StakerExtendedTest is Test {
         uint256 initNumDeposits = staker.numDeposits(me);
         uint256 lastIndex = initNumDeposits - 1;
         staker.withdrawToken(id, me, new bytes(0));
-        vm.expectRevert(bytes("UniswapV3StakerExtended: index OOB"));
+        vm.expectRevert(bytes('UniswapV3StakerExtended: index OOB'));
         staker.userDeposits(me, lastIndex);
         assertEq(staker.numDeposits(me), initNumDeposits - 1);
     }
@@ -95,11 +95,11 @@ contract V3StakerExtendedTest is Test {
     }
 
     function test_deposit_revert_bad_index() public {
-        vm.expectRevert(bytes("UniswapV3StakerExtended: index OOB"));
+        vm.expectRevert(bytes('UniswapV3StakerExtended: index OOB'));
         staker.userDeposits(me, 0);
-        _deposit_and_check(tokenId);   
+        _deposit_and_check(tokenId);
         staker.userDeposits(me, 0);
-        vm.expectRevert(bytes("UniswapV3StakerExtended: index OOB"));
+        vm.expectRevert(bytes('UniswapV3StakerExtended: index OOB'));
         staker.userDeposits(me, 1);
     }
 
@@ -110,20 +110,20 @@ contract V3StakerExtendedTest is Test {
 
     function test_withdraw_index() public {
         _deposit_and_check(tokenId); // first
-        uint secondId = _mint();
+        uint256 secondId = _mint();
         _deposit_and_check(secondId); // second
-        uint thirdId = _mint();
+        uint256 thirdId = _mint();
         _deposit_and_check(thirdId); // third
 
         _withdraw_and_check(tokenId);
         _withdraw_and_check(thirdId); // if we have indexining issues it will start to break here
-        uint recordedFirstToken = staker.userDeposits(me, 0);
-        require(recordedFirstToken != thirdId, "indexing error");
+        uint256 recordedFirstToken = staker.userDeposits(me, 0);
+        require(recordedFirstToken != thirdId, 'indexing error');
     }
 
     function test_withdraw_moves_last() public {
         _deposit_and_check(tokenId); // first
-        uint newId = _mint();
+        uint256 newId = _mint();
         _deposit_and_check(newId); // second
         assertEq(staker.userDeposits(me, 1), newId);
         _withdraw_and_check(tokenId); // remove first
@@ -133,13 +133,12 @@ contract V3StakerExtendedTest is Test {
 
     function test_withdraw_moves_last_to_middle() public {
         _deposit_and_check(tokenId); // first
-        uint secondId = _mint();
+        uint256 secondId = _mint();
         _deposit_and_check(secondId); // second
         assertEq(staker.userDeposits(me, 1), secondId);
-        uint thirdId = _mint();
+        uint256 thirdId = _mint();
         _deposit_and_check(thirdId); // third
         assertEq(staker.userDeposits(me, 2), thirdId);
-
 
         _withdraw_and_check(secondId); // remove second
         assertEq(staker.numDeposits(me), 2);
@@ -148,13 +147,12 @@ contract V3StakerExtendedTest is Test {
 
     function test_withdraw_moves_last_to_front() public {
         _deposit_and_check(tokenId); // first
-        uint secondId = _mint();
+        uint256 secondId = _mint();
         _deposit_and_check(secondId); // second
         assertEq(staker.userDeposits(me, 1), secondId);
-        uint thirdId = _mint();
+        uint256 thirdId = _mint();
         _deposit_and_check(thirdId); // third
         assertEq(staker.userDeposits(me, 2), thirdId);
-
 
         _withdraw_and_check(tokenId); // remove second
         assertEq(staker.numDeposits(me), 2);
@@ -170,9 +168,9 @@ contract V3StakerExtendedTest is Test {
 
     function test_transfer() public {
         _deposit_and_check(tokenId); // first
-        uint secondId = _mint();
+        uint256 secondId = _mint();
         _deposit_and_check(secondId); // second
-        uint thirdId = _mint();
+        uint256 thirdId = _mint();
         _deposit_and_check(thirdId); // third
         staker.transferDeposit(thirdId, other);
         staker.transferDeposit(tokenId, other);
@@ -182,7 +180,7 @@ contract V3StakerExtendedTest is Test {
         assertEq(staker.userDeposits(other, 2), secondId);
     }
 
-    function _mock_incentive() private returns(IUniswapV3Staker.IncentiveKey memory) {
+    function _mock_incentive() private returns (IUniswapV3Staker.IncentiveKey memory) {
         BTC.approve(address(staker), MAX_UINT);
         IUniswapV3Staker.IncentiveKey memory key = IUniswapV3Staker.IncentiveKey(
             IERC20Minimal(wbtc),
@@ -213,7 +211,7 @@ contract V3StakerExtendedTest is Test {
         bytes32 hashedKey = keccak256(abi.encode(key));
         (, , , , , , , uint256 liquidity, , , , ) = nftManager.positions(tokenId);
         staker.stakeToken(key, tokenId);
-        uint newId = _mint();
+        uint256 newId = _mint();
         nftManager.safeTransferFrom(me, address(staker), newId);
         uint256 initStakedLiquidity = staker.incentiveLiquidity(hashedKey);
         staker.stakeToken(key, newId);
@@ -222,5 +220,72 @@ contract V3StakerExtendedTest is Test {
         staker.stakeToken(key, newId);
         (, , , , , , , uint256 newLiq, , , , ) = nftManager.positions(newId);
         assertEq(staker.incentiveLiquidity(hashedKey), newLiq + liquidity);
+    }
+
+    function test_add_liquidity() public {
+        _deposit_and_check(tokenId);
+        IUniswapV3Staker.IncentiveKey memory key = _mock_incentive();
+        staker.stakeToken(key, tokenId);
+
+        deal(weth, me, 10000 ether);
+
+        WETH.approve(address(staker), MAX_UINT);
+        BTC.approve(address(staker), MAX_UINT);
+
+        INonfungiblePositionManager.IncreaseLiquidityParams
+            memory params = INonfungiblePositionManager.IncreaseLiquidityParams(
+                tokenId,
+                1e8,
+                1 ether,
+                1,
+                1,
+                block.timestamp + 3000
+            );
+
+        (, , , , , , , uint128 initLiq, , , , ) = nftManager.positions(tokenId);
+
+        uint256 initBtcBal = BTC.balanceOf(me);
+        uint256 initEthBal = WETH.balanceOf(me);
+
+        emit log_uint(initBtcBal);
+        emit log_uint(initEthBal);
+        staker.increaseLiquidity(key, params); // send with no value -> using weth
+        emit log_uint(BTC.balanceOf(me));
+        emit log_uint(WETH.balanceOf(me));
+
+        (, , , , , , , uint128 finalLiq, , , , ) = nftManager.positions(tokenId);
+
+        assert(initBtcBal > BTC.balanceOf(me));
+        assert(initEthBal > WETH.balanceOf(me));
+        assert(finalLiq > initLiq);
+        // check we can get some rewards
+    }
+
+    function test_remove_liquidity() public {
+        _deposit_and_check(tokenId);
+        IUniswapV3Staker.IncentiveKey memory key = _mock_incentive();
+        staker.stakeToken(key, tokenId);
+
+        INonfungiblePositionManager.DecreaseLiquidityParams
+            memory params = INonfungiblePositionManager.DecreaseLiquidityParams(
+                tokenId,
+                1e8,
+                1,
+                1,
+                block.timestamp + 3000
+            );
+
+        (, , , , , , , uint128 initLiq, , , , ) = nftManager.positions(tokenId);
+
+        uint256 initBtcBal = BTC.balanceOf(me);
+        uint256 initEthBal = me.balance;
+
+        staker.decreaseLiquidity(key, params);
+
+        (, , , , , , , uint128 finalLiq, , , , ) = nftManager.positions(tokenId);
+
+        assert(initBtcBal < BTC.balanceOf(me));
+        assert(initEthBal < me.balance);
+        assert(finalLiq < initLiq);
     }
 }

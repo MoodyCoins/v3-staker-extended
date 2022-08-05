@@ -122,6 +122,13 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
         maxIncentiveDuration = _maxIncentiveDuration;
     }
 
+    receive() external payable {
+        require(
+            msg.sender == address(nonfungiblePositionManager),
+            'UniswapV3Staker::receive: Not WETH9'
+        );
+    }
+
     /// @inheritdoc IUniswapV3Staker
     function createIncentive(IncentiveKey memory key, uint256 reward) external override onlyOwner {
         require(reward > 0, 'UniswapV3Staker::createIncentive: reward must be positive');
@@ -536,94 +543,72 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
         )
     {
         _unstake(key, params.tokenId, msg.sender);
-
-        (IUniswapV3Pool pool, , , ) = NFTPositionInfo.getPositionInfo(
-            factory,
-            nonfungiblePositionManager,
+        (, , address token0, address token1, , , , , , , , ) = nonfungiblePositionManager.positions(
             params.tokenId
         );
 
-        address token0 = pool.token0();
-        address token1 = pool.token1();
+        bool eth0 = token0 == address(WETH9) && msg.value > 0;
+        bool eth1 = token1 == address(WETH9) && msg.value > 0;
 
         // collect necessary tokens
-        if (token0 == address(WETH9) && msg.value > 0) {
-            require(
-                msg.value > params.amount0Desired,
-                'UniswapV3Staker::stakeToken: not enough ETH sent'
-            );
-            IWETH9(WETH9).deposit{value: params.amount0Desired}();
-        } else {
+        if (eth0)
+            require(msg.value >= params.amount0Desired, 'UniswapV3Staker: Not enough ETH sent');
+        else
             TransferHelper.safeTransferFrom(
                 token0,
                 msg.sender,
                 address(this),
                 params.amount0Desired
             );
-        }
 
-        if (token1 == address(WETH9) && msg.value > 0) {
-            require(
-                msg.value > params.amount0Desired,
-                'UniswapV3Staker::stakeToken: not enough ETH sent'
-            );
-            IWETH9(WETH9).deposit{value: params.amount1Desired}();
-        } else {
+        if (eth1)
+            require(msg.value >= params.amount1Desired, 'UniswapV3Staker: Not enough ETH sent');
+        else
             TransferHelper.safeTransferFrom(
-                token0,
+                token1,
                 msg.sender,
                 address(this),
                 params.amount1Desired
             );
+
+        _checkAllowance(token0, token1);
+
+        (uint256 out0, uint256 out1) = (0, 0);
+        {
+            uint256 init0 = eth0 ? address(this).balance : IERC20(token0).balanceOf(address(this));
+            uint256 init1 = eth1 ? address(this).balance : IERC20(token1).balanceOf(address(this));
+
+            // increase liq
+            (liquidity, amount0, amount1) = nonfungiblePositionManager.increaseLiquidity{
+                value: msg.value
+            }(params);
+
+            nonfungiblePositionManager.refundETH();
+
+            _stakeToken(key, params.tokenId);
+
+            out0 = init0 - (eth0 ? address(this).balance : IERC20(token0).balanceOf(address(this)));
+            out1 = init1 - (eth1 ? address(this).balance : IERC20(token1).balanceOf(address(this)));
         }
-
-        // increase liq
-        (liquidity, amount0, amount1) = nonfungiblePositionManager.increaseLiquidity(params);
-
-        _stakeToken(key, params.tokenId);
-
         // refund - we sent params.amountDesired
-        if (token0 == address(WETH9) && msg.value > 0) {
-            if (params.amount0Desired > amount0) {
-                uint256 deltaValue = msg.value - params.amount0Desired;
-                IWETH9(WETH9).withdraw(params.amount0Desired - amount0);
-                (bool success, ) = msg.sender.call{
-                    value: deltaValue + params.amount0Desired - amount0
-                }(new bytes(0));
-                require(success, 'UniswapV3Staker::stakeToken: ETH transfer failed');
-            }
-        } else {
-            if (params.amount0Desired > amount0) {
-                TransferHelper.safeTransfer(token0, msg.sender, params.amount0Desired - amount0);
-            }
+        if (eth0) TransferHelper.safeTransferETH(msg.sender, msg.value - out0);
+        else if (params.amount0Desired > out0) {
+            TransferHelper.safeTransfer(token0, msg.sender, params.amount0Desired - out0);
         }
 
-        if (token1 == address(WETH9) && msg.value > 0) {
-            if (params.amount1Desired > amount1) {
-                uint256 deltaValue = msg.value - params.amount1Desired;
-                IWETH9(WETH9).withdraw(params.amount1Desired - amount1);
-                (bool success, ) = msg.sender.call{
-                    value: deltaValue + params.amount1Desired - amount1
-                }(new bytes(0));
-                require(success, 'UniswapV3Staker::stakeToken: ETH transfer failed');
-            }
-        } else {
-            if (params.amount1Desired > amount1) {
-                TransferHelper.safeTransfer(token1, msg.sender, params.amount1Desired - amount1);
-            }
+        if (eth1) TransferHelper.safeTransferETH(msg.sender, msg.value - out1);
+        else if (params.amount1Desired > out1) {
+            TransferHelper.safeTransfer(token1, msg.sender, params.amount1Desired - out1);
         }
     }
 
-    // need to call collect() on the pool after this
     function decreaseLiquidity(
         IncentiveKey memory key,
         INonfungiblePositionManager.DecreaseLiquidityParams calldata params
     ) external payable returns (uint256 amount0, uint256 amount1) {
         _unstake(key, params.tokenId, msg.sender);
 
-        (IUniswapV3Pool pool, , , ) = NFTPositionInfo.getPositionInfo(
-            factory,
-            nonfungiblePositionManager,
+        (, , address token0, address token1, , , , , , , , ) = nonfungiblePositionManager.positions(
             params.tokenId
         );
 
@@ -631,15 +616,31 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
 
         // Will not let you decrease the entire amount of liquidity, should just withdraw for that
         // checks that position liquidity != 0
-        _stakeToken(key, params.tokenId);
 
-        nonfungiblePositionManager.collect(
+        (uint256 collect0, uint256 collect1) = nonfungiblePositionManager.collect(
             INonfungiblePositionManager.CollectParams(
                 params.tokenId,
-                msg.sender,
+                address(0),
                 MAX_UINT_128,
                 MAX_UINT_128
             )
         );
+
+        if (token0 == address(WETH9)) nonfungiblePositionManager.unwrapWETH9(collect0, msg.sender);
+        else nonfungiblePositionManager.sweepToken(token0, collect0, msg.sender);
+        if (token1 == address(WETH9)) nonfungiblePositionManager.unwrapWETH9(collect1, msg.sender);
+        else nonfungiblePositionManager.sweepToken(token1, collect1, msg.sender);
+
+        _stakeToken(key, params.tokenId);
+    }
+
+    function _checkAllowance(address token0, address token1) private {
+        // tokens should never sit in here for more than a transaction, so we are ok approving max
+        if ((IERC20(token0).allowance(address(this), address(nonfungiblePositionManager)) == 0)) {
+            IERC20(token0).approve(address(nonfungiblePositionManager), type(uint256).max);
+        }
+        if ((IERC20(token1).allowance(address(this), address(nonfungiblePositionManager)) == 0)) {
+            IERC20(token1).approve(address(nonfungiblePositionManager), type(uint256).max);
+        }
     }
 }
