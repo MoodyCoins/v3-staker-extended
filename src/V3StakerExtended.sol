@@ -606,24 +606,19 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
         IncentiveKey memory key,
         INonfungiblePositionManager.DecreaseLiquidityParams calldata params
     ) external payable returns (uint256 amount0, uint256 amount1) {
-        _unstake(key, params.tokenId, msg.sender);
+        uint256 id = params.tokenId;
+        _unstake(key, id, msg.sender);
 
         (, , address token0, address token1, , , , , , , , ) = nonfungiblePositionManager.positions(
-            params.tokenId
+            id
         );
 
         (amount0, amount1) = nonfungiblePositionManager.decreaseLiquidity(params);
 
         // Will not let you decrease the entire amount of liquidity, should just withdraw for that
         // checks that position liquidity != 0
-
         (uint256 collect0, uint256 collect1) = nonfungiblePositionManager.collect(
-            INonfungiblePositionManager.CollectParams(
-                params.tokenId,
-                address(0),
-                MAX_UINT_128,
-                MAX_UINT_128
-            )
+            INonfungiblePositionManager.CollectParams(id, address(0), MAX_UINT_128, MAX_UINT_128)
         );
 
         if (token0 == address(WETH9)) nonfungiblePositionManager.unwrapWETH9(collect0, msg.sender);
