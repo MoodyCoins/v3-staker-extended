@@ -570,8 +570,12 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
             uint256 amount1
         )
     {
+        uint256 id = params.tokenId;
+
+        _unstake(key, id, msg.sender);
+
         (, , address token0, address token1, , , , , , , , ) = nonfungiblePositionManager.positions(
-            params.tokenId
+            id
         );
 
         bool eth0 = token0 == address(WETH9) && msg.value > 0;
@@ -612,12 +616,11 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
 
             nonfungiblePositionManager.refundETH();
 
+            _stakeToken(key, id);
+
             out0 = init0 - (eth0 ? address(this).balance : IERC20(token0).balanceOf(address(this)));
             out1 = init1 - (eth1 ? address(this).balance : IERC20(token1).balanceOf(address(this)));
         }
-
-        // record increase of incentive liquidity
-        incentiveLiquidity[IncentiveId.compute(key)] += liquidity;
 
         // refund - we sent params.amountDesired
         if (eth0) TransferHelper.safeTransferETH(msg.sender, msg.value - out0);
@@ -638,19 +641,7 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
     ) external payable returns (uint256 amount0, uint256 amount1) {
         uint256 id = params.tokenId;
 
-        Deposit memory deposit = deposits[id];
-        require(
-            deposit.owner == msg.sender,
-            'UniswapV3Staker::withdrawToken: only owner can decrease liquidity'
-        );
-
-        bytes32 incentiveId = IncentiveId.compute(key);
-
-        uint256 liq = params.liquidity;
-
-        // record loss of incentive liquidity
-        if (incentiveLiquidity[incentiveId] > liq) incentiveLiquidity[incentiveId] -= liq;
-        else incentiveLiquidity[incentiveId] = 0;
+        _unstake(key, id, msg.sender);
 
         nonfungiblePositionManager.decreaseLiquidity(params);
 
@@ -664,6 +655,8 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
                 MAX_UINT_128 // amount1Max
             )
         );
+
+        _stakeToken(key, id);
     }
 
     // NEW
