@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // see: https://github.com/Uniswap/v3-staker/blob/4328b957701de8bed83689aa22c32eda7928d5ab/contracts/UniswapV3Staker.sol
-// slightly modified from uniswap
+
+// Modified from uniswap
 // Search "NEW" for all changes
 
 pragma solidity =0.7.6;
@@ -17,10 +18,16 @@ import '@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol';
 import '@uniswap/v3-core/contracts/interfaces/IERC20Minimal.sol';
 
 import '@uniswap/v3-periphery/contracts/interfaces/INonfungiblePositionManager.sol';
+import '@uniswap/v3-periphery/contracts/NonfungiblePositionManager.sol';
 import '@uniswap/v3-periphery/contracts/base/Multicall.sol';
 
+// NEW: contract is ownable to allow for extra functionality
+import '@openzeppelin/contracts/access/Ownable.sol';
+
 /// @title Extended Uniswap V3 staking interface
-contract V3StakerExtended is IUniswapV3Staker, Multicall {
+contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
+    uint128 constant MAX_UINT_128 = type(uint128).max;
+
     /// @notice Represents a staking incentive
     struct Incentive {
         uint256 totalRewardUnclaimed;
@@ -43,6 +50,10 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall {
         uint128 liquidityIfOverflow;
     }
 
+    // NEW
+    /// @dev Used to increase and decrease liquidity while staked
+    IWETH9 public immutable WETH9;
+
     /// @inheritdoc IUniswapV3Staker
     IUniswapV3Factory public immutable override factory;
     /// @inheritdoc IUniswapV3Staker
@@ -62,18 +73,34 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall {
     /// @dev stakes[tokenId][incentiveHash] => Stake
     mapping(uint256 => mapping(bytes32 => Stake)) private _stakes;
 
-    // NEW: used for enumerating user deposits
+    // NEW
+    /// @dev _userDeposits[user][index] => tokenId
     mapping(address => mapping(uint256 => uint256)) private _userDeposits;
+
+    // NEW
+    /// @dev numDeposits[user] => numberOfUserDeposits
     mapping(address => uint256) public numDeposits;
+
+    // NEW
+    /// @dev userDepositsIndex[tokenId] => index
     mapping(uint256 => uint256) private _userDepositsIndex;
 
-   function userDeposits(address user, uint256 index) public view returns (uint256 tokenId) {
-       require(index < numDeposits[user], "UniswapV3StakerExtended: index OOB");
-       return _userDeposits[user][index];
-   }
-
-    // NEW: used for tracking an incentives total liquidity
+    // NEW
+    /// @dev incentiveLiquidity[hashedIncentiveKey] => totalLiquidityStakedInIncentive
     mapping(bytes32 => uint256) public incentiveLiquidity;
+
+    function userDeposits(address user, uint256 index) public view returns (uint256 tokenId) {
+        require(index < numDeposits[user], 'UniswapV3StakerExtended: index OOB');
+        return _userDeposits[user][index];
+    }
+
+    function userDepositsIndex(uint256 tokenId) public view returns (uint256 index) {
+        require(
+            deposits[tokenId].owner != address(0),
+            'UniswapV3StakerExtended: token not deposited'
+        );
+        return _userDepositsIndex[tokenId];
+    }
 
     /// @inheritdoc IUniswapV3Staker
     function stakes(uint256 tokenId, bytes32 incentiveId)
@@ -94,6 +121,12 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall {
     /// @inheritdoc IUniswapV3Staker
     mapping(IERC20Minimal => mapping(address => uint256)) public override rewards;
 
+    // NEW: An incentive was altered
+    /// @param incentiveId the id of the incentive
+    /// @param change the change in liquidity
+    /// @param increase was liquidity increased or decreased
+    event IncentiveAltered(bytes32 indexed incentiveId, uint256 change, bool increase);
+
     /// @param _factory the Uniswap V3 factory
     /// @param _nonfungiblePositionManager the NFT position manager contract address
     /// @param _maxIncentiveStartLeadTime the max duration of an incentive in seconds
@@ -102,16 +135,26 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall {
         IUniswapV3Factory _factory,
         INonfungiblePositionManager _nonfungiblePositionManager,
         uint256 _maxIncentiveStartLeadTime,
-        uint256 _maxIncentiveDuration
+        uint256 _maxIncentiveDuration,
+        address _weth
     ) {
         factory = _factory;
         nonfungiblePositionManager = _nonfungiblePositionManager;
         maxIncentiveStartLeadTime = _maxIncentiveStartLeadTime;
         maxIncentiveDuration = _maxIncentiveDuration;
+
+        WETH9 = IWETH9(_weth);
+    }
+
+    receive() external payable {
+        require(
+            msg.sender == address(nonfungiblePositionManager),
+            'UniswapV3Staker::receive: Not WETH9'
+        );
     }
 
     /// @inheritdoc IUniswapV3Staker
-    function createIncentive(IncentiveKey memory key, uint256 reward) external override {
+    function createIncentive(IncentiveKey memory key, uint256 reward) external override onlyOwner {
         require(reward > 0, 'UniswapV3Staker::createIncentive: reward must be positive');
         require(
             block.timestamp <= key.startTime,
@@ -151,8 +194,45 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall {
         );
     }
 
+    // TODO: test
+    // NEW: Alter the unclaimed rewards in an incentive
+    /// @dev Warning: this will alter unclaimed stakes by the proportional percentage you change
+    /// totalRewardUnclaimed
+    function alterIncentive(
+        IncentiveKey memory key,
+        uint256 change,
+        bool increase
+    ) external onlyOwner {
+        bytes32 incentiveId = IncentiveId.compute(key);
+        Incentive storage incentive = incentives[incentiveId];
+
+        if (increase)
+            TransferHelperExtended.safeTransferFrom(
+                address(key.rewardToken),
+                msg.sender,
+                address(this),
+                change
+            );
+
+        uint256 unclaimed = incentive.totalRewardUnclaimed;
+        if (!increase) {
+            require(unclaimed > change, 'UniswapV3Staker::alterIncentive: too much');
+            incentive.totalRewardUnclaimed -= change;
+        } else incentive.totalRewardUnclaimed += change;
+
+        if (!increase)
+            TransferHelperExtended.safeTransfer(address(key.rewardToken), key.refundee, change);
+
+        emit IncentiveAltered(incentiveId, change, increase);
+    }
+
     /// @inheritdoc IUniswapV3Staker
-    function endIncentive(IncentiveKey memory key) external override returns (uint256 refund) {
+    function endIncentive(IncentiveKey memory key)
+        external
+        override
+        onlyOwner
+        returns (uint256 refund)
+    {
         require(
             block.timestamp >= key.endTime,
             'UniswapV3Staker::endIncentive: cannot end incentive before end time'
@@ -276,11 +356,19 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall {
 
     /// @inheritdoc IUniswapV3Staker
     function unstakeToken(IncentiveKey memory key, uint256 tokenId) external override {
+        _unstake(key, tokenId, msg.sender);
+    }
+
+    function _unstake(
+        IncentiveKey memory key,
+        uint256 tokenId,
+        address sender
+    ) internal {
         Deposit memory deposit = deposits[tokenId];
         // anyone can call unstakeToken if the block time is after the end time of the incentive
         if (block.timestamp < key.endTime) {
             require(
-                deposit.owner == msg.sender,
+                deposit.owner == sender,
                 'UniswapV3Staker::unstakeToken: only owner can withdraw token before incentive end time'
             );
         }
@@ -442,7 +530,8 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall {
         emit TokenStaked(tokenId, incentiveId, liquidity);
     }
 
-    // NEW: records a user deposit
+    // NEW
+    /// @dev Records a user deposit
     function _recordUserDeposit(address account, uint256 tokenId) internal {
         uint256 length = numDeposits[account];
         _userDeposits[account][length] = tokenId;
@@ -450,17 +539,141 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall {
         numDeposits[account]++;
     }
 
-    // NEW: deletes a user deposit
+    // NEW
+    /// @dev Deletes records of a user deposit
     function _deleteUserDeposit(address account, uint256 tokenId) internal {
         uint256 lastTokenIndex = numDeposits[account] - 1;
         uint256 tokenIndex = _userDepositsIndex[tokenId];
+
         if (tokenIndex != lastTokenIndex) {
             uint256 lastTokenId = _userDeposits[account][lastTokenIndex];
             _userDeposits[account][tokenIndex] = lastTokenId;
             _userDepositsIndex[lastTokenId] = tokenIndex;
         }
+
         numDeposits[account]--;
+
         delete _userDepositsIndex[tokenId];
         delete _userDeposits[account][lastTokenIndex];
+    }
+
+    // NEW
+    function increaseLiquidity(
+        IncentiveKey memory key,
+        INonfungiblePositionManager.IncreaseLiquidityParams calldata params
+    )
+        external
+        payable
+        returns (
+            uint128 liquidity,
+            uint256 amount0,
+            uint256 amount1
+        )
+    {
+        (, , address token0, address token1, , , , , , , , ) = nonfungiblePositionManager.positions(
+            params.tokenId
+        );
+
+        bool eth0 = token0 == address(WETH9) && msg.value > 0;
+        bool eth1 = token1 == address(WETH9) && msg.value > 0;
+
+        // collect necessary tokens
+        if (eth0)
+            require(msg.value >= params.amount0Desired, 'UniswapV3Staker: Not enough ETH sent');
+        else
+            TransferHelper.safeTransferFrom(
+                token0,
+                msg.sender,
+                address(this),
+                params.amount0Desired
+            );
+
+        if (eth1)
+            require(msg.value >= params.amount1Desired, 'UniswapV3Staker: Not enough ETH sent');
+        else
+            TransferHelper.safeTransferFrom(
+                token1,
+                msg.sender,
+                address(this),
+                params.amount1Desired
+            );
+
+        _checkAllowance(token0, token1);
+
+        (uint256 out0, uint256 out1) = (0, 0);
+        {
+            uint256 init0 = eth0 ? address(this).balance : IERC20(token0).balanceOf(address(this));
+            uint256 init1 = eth1 ? address(this).balance : IERC20(token1).balanceOf(address(this));
+
+            // increase liq
+            (liquidity, amount0, amount1) = nonfungiblePositionManager.increaseLiquidity{
+                value: msg.value
+            }(params);
+
+            nonfungiblePositionManager.refundETH();
+
+            out0 = init0 - (eth0 ? address(this).balance : IERC20(token0).balanceOf(address(this)));
+            out1 = init1 - (eth1 ? address(this).balance : IERC20(token1).balanceOf(address(this)));
+        }
+
+        // record increase of incentive liquidity
+        incentiveLiquidity[IncentiveId.compute(key)] += liquidity;
+
+        // refund - we sent params.amountDesired
+        if (eth0) TransferHelper.safeTransferETH(msg.sender, msg.value - out0);
+        else if (params.amount0Desired > out0) {
+            TransferHelper.safeTransfer(token0, msg.sender, params.amount0Desired - out0);
+        }
+
+        if (eth1) TransferHelper.safeTransferETH(msg.sender, msg.value - out1);
+        else if (params.amount1Desired > out1) {
+            TransferHelper.safeTransfer(token1, msg.sender, params.amount1Desired - out1);
+        }
+    }
+
+    // NEW
+    function decreaseLiquidity(
+        IncentiveKey memory key,
+        INonfungiblePositionManager.DecreaseLiquidityParams calldata params
+    ) external payable returns (uint256 amount0, uint256 amount1) {
+        uint256 id = params.tokenId;
+
+        Deposit memory deposit = deposits[id];
+        require(
+            deposit.owner == msg.sender,
+            'UniswapV3Staker::withdrawToken: only owner can decrease liquidity'
+        );
+
+        bytes32 incentiveId = IncentiveId.compute(key);
+
+        uint256 liq = params.liquidity;
+
+        // record loss of incentive liquidity
+        if (incentiveLiquidity[incentiveId] > liq) incentiveLiquidity[incentiveId] -= liq;
+        else incentiveLiquidity[incentiveId] = 0;
+
+        nonfungiblePositionManager.decreaseLiquidity(params);
+
+        // Will not let you decrease the entire amount of liquidity, should just withdraw for that
+        // checks that position liquidity != 0
+        (amount0, amount1) = nonfungiblePositionManager.collect(
+            INonfungiblePositionManager.CollectParams(
+                id, // tokenId
+                msg.sender, // recipient
+                MAX_UINT_128, // amount0Max
+                MAX_UINT_128 // amount1Max
+            )
+        );
+    }
+
+    // NEW
+    function _checkAllowance(address token0, address token1) private {
+        // tokens should never sit in here for more than a transaction, so we are ok approving max
+        if ((IERC20(token0).allowance(address(this), address(nonfungiblePositionManager)) == 0)) {
+            IERC20(token0).approve(address(nonfungiblePositionManager), type(uint256).max);
+        }
+        if ((IERC20(token1).allowance(address(this), address(nonfungiblePositionManager)) == 0)) {
+            IERC20(token1).approve(address(nonfungiblePositionManager), type(uint256).max);
+        }
     }
 }
