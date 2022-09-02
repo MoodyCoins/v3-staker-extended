@@ -194,8 +194,8 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
         );
     }
 
-    // TODO: test
-    // NEW: Alter the unclaimed rewards in an incentive
+    // NEW
+    /// @dev Alter the unclaimed rewards in an incentive
     /// @dev Warning: this will alter unclaimed stakes by the proportional percentage you change
     /// totalRewardUnclaimed
     function alterIncentive(
@@ -558,6 +558,7 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
     }
 
     // NEW
+    /// @dev Increase the liquidity of a currently staked NFT position
     function increaseLiquidity(
         IncentiveKey memory key,
         INonfungiblePositionManager.IncreaseLiquidityParams calldata params
@@ -635,6 +636,7 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
     }
 
     // NEW
+    /// @dev Decrease the liquidity of a currently staked NFT position
     function decreaseLiquidity(
         IncentiveKey memory key,
         INonfungiblePositionManager.DecreaseLiquidityParams calldata params
@@ -660,6 +662,7 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
     }
 
     // NEW
+    /// @dev Checks if the given tokens have been authorized for use by the nftmanager
     function _checkAllowance(address token0, address token1) private {
         // tokens should never sit in here for more than a transaction, so we are ok approving max
         if ((IERC20(token0).allowance(address(this), address(nonfungiblePositionManager)) == 0)) {
