@@ -531,7 +531,11 @@ contract V3StakerExtendedTest is Test {
 
         staker.transferDeposit(tokenId, other);
 
-        vm.expectRevert(bytes('UniswapV3Staker::withdrawToken: only owner can decrease liquidity'));
+        vm.expectRevert(
+            bytes(
+                'UniswapV3Staker::unstakeToken: only owner can withdraw token before incentive end time'
+            )
+        );
         staker.decreaseLiquidity(key, params);
     }
 }
