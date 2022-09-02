@@ -1,24 +1,23 @@
 # V3 Staker Extended
 
+TODO: This readme is currently outdated
+
 ## Deployments
-
-If you want to try using this contract it is deployed to the following places:
-
-```solidity
-Rinkeby: 0xd0Cd2CF5fCc2E83B970Bb2f5Cea3332aFC3F6412
-```
 
 ## What is this?
 
 An extension of the [V3 Staker](https://github.com/Uniswap/v3-staker) made by uniswap. In the original contract, not enough information is exposed on-chain to allow for the fetching of basic data. E.g. simple acquisition of a given user's deposits is impossible. In an emergency scenario where users must use the chain to retrieve assets, this is not optimal. This also makes it easier on developers who want to implement v3 staking but don't want to use an indexer.
+
+This contract also allows users to increase and decrease liquidity for their staked NFT positions without having to unstake and perform multiple steps. This more closely models the functionality of the traditional MasterChef contract.
 
 ## How to use
 
 These contracts expose a few new functions that allow for the enumeration of user deposits, and retrieval of the total liquidity deposited in a given incentive. We can get the total number of deposits a user has made into this staker and then retrieve these deposits with the user address and a given index, up to the number of deposits. ```userDeposits``` returns the V3 liquidity position nft token Id that has been deposited in the staker.
 
 ```solidity
-function numDeposits(address)        public returns (uint);
-function userDeposits(address, uint) public returns (uint);
+function numDeposits(address user) public returns (uint);
+function userDeposits(address user, uint256 index) public view returns (uint256 tokenId);
+function userDepositsIndex(uint tokenId) public view returns (uint256 index);
 ```
 
 We can also get the total liquidity deposited into a given incentive with:
