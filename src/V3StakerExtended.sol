@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // see: https://github.com/Uniswap/v3-staker/blob/4328b957701de8bed83689aa22c32eda7928d5ab/contracts/UniswapV3Staker.sol
-// slightly modified from uniswap
+
+// Modified from uniswap
 // Search "NEW" for all changes
 
 pragma solidity =0.7.6;
@@ -49,6 +50,10 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
         uint128 liquidityIfOverflow;
     }
 
+    // NEW
+    /// @dev Used to increase and decrease liquidity while staked
+    IWETH9 public immutable WETH9;
+
     /// @inheritdoc IUniswapV3Staker
     IUniswapV3Factory public immutable override factory;
     /// @inheritdoc IUniswapV3Staker
@@ -68,21 +73,34 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
     /// @dev stakes[tokenId][incentiveHash] => Stake
     mapping(uint256 => mapping(bytes32 => Stake)) private _stakes;
 
-    // NEW: used for enumerating user deposits
+    // NEW
+    /// @dev _userDeposits[user][index] => tokenId
     mapping(address => mapping(uint256 => uint256)) private _userDeposits;
+
+    // NEW
+    /// @dev numDeposits[user] => numberOfUserDeposits
     mapping(address => uint256) public numDeposits;
+
+    // NEW
+    /// @dev userDepositsIndex[tokenId] => index
     mapping(uint256 => uint256) private _userDepositsIndex;
 
-    // IWETH9 public immutable WETH9 = IWETH9(0xc778417E063141139Fce010982780140Aa0cD5Ab); //rinkeby
-    IWETH9 public immutable WETH9 = IWETH9(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2); //mainnet
+    // NEW
+    /// @dev incentiveLiquidity[hashedIncentiveKey] => totalLiquidityStakedInIncentive
+    mapping(bytes32 => uint256) public incentiveLiquidity;
 
     function userDeposits(address user, uint256 index) public view returns (uint256 tokenId) {
         require(index < numDeposits[user], 'UniswapV3StakerExtended: index OOB');
         return _userDeposits[user][index];
     }
 
-    // NEW: used for tracking an incentives total liquidity
-    mapping(bytes32 => uint256) public incentiveLiquidity;
+    function userDepositsIndex(uint256 tokenId) public view returns (uint256 index) {
+        require(
+            deposits[tokenId].owner != address(0),
+            'UniswapV3StakerExtended: token not deposited'
+        );
+        return _userDepositsIndex[tokenId];
+    }
 
     /// @inheritdoc IUniswapV3Staker
     function stakes(uint256 tokenId, bytes32 incentiveId)
@@ -104,6 +122,9 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
     mapping(IERC20Minimal => mapping(address => uint256)) public override rewards;
 
     // NEW: An incentive was altered
+    /// @param incentiveId the id of the incentive
+    /// @param change the change in liquidity
+    /// @param increase was liquidity increased or decreased
     event IncentiveAltered(bytes32 indexed incentiveId, uint256 change, bool increase);
 
     /// @param _factory the Uniswap V3 factory
@@ -114,12 +135,15 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
         IUniswapV3Factory _factory,
         INonfungiblePositionManager _nonfungiblePositionManager,
         uint256 _maxIncentiveStartLeadTime,
-        uint256 _maxIncentiveDuration
+        uint256 _maxIncentiveDuration,
+        address _weth
     ) {
         factory = _factory;
         nonfungiblePositionManager = _nonfungiblePositionManager;
         maxIncentiveStartLeadTime = _maxIncentiveStartLeadTime;
         maxIncentiveDuration = _maxIncentiveDuration;
+
+        WETH9 = IWETH9(_weth);
     }
 
     receive() external payable {
@@ -506,7 +530,8 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
         emit TokenStaked(tokenId, incentiveId, liquidity);
     }
 
-    // NEW: records a user deposit
+    // NEW
+    /// @dev Records a user deposit
     function _recordUserDeposit(address account, uint256 tokenId) internal {
         uint256 length = numDeposits[account];
         _userDeposits[account][length] = tokenId;
@@ -514,22 +539,25 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
         numDeposits[account]++;
     }
 
-    // NEW: deletes a user deposit
+    // NEW
+    /// @dev Deletes records of a user deposit
     function _deleteUserDeposit(address account, uint256 tokenId) internal {
         uint256 lastTokenIndex = numDeposits[account] - 1;
         uint256 tokenIndex = _userDepositsIndex[tokenId];
+
         if (tokenIndex != lastTokenIndex) {
             uint256 lastTokenId = _userDeposits[account][lastTokenIndex];
             _userDeposits[account][tokenIndex] = lastTokenId;
             _userDepositsIndex[lastTokenId] = tokenIndex;
         }
+
         numDeposits[account]--;
+
         delete _userDepositsIndex[tokenId];
         delete _userDeposits[account][lastTokenIndex];
     }
 
-    // NEW: increase and decrease liquidity while staking
-    // TODO: this code is nasty
+    // NEW
     function increaseLiquidity(
         IncentiveKey memory key,
         INonfungiblePositionManager.IncreaseLiquidityParams calldata params
@@ -542,7 +570,6 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
             uint256 amount1
         )
     {
-        _unstake(key, params.tokenId, msg.sender);
         (, , address token0, address token1, , , , , , , , ) = nonfungiblePositionManager.positions(
             params.tokenId
         );
@@ -585,11 +612,13 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
 
             nonfungiblePositionManager.refundETH();
 
-            _stakeToken(key, params.tokenId);
-
             out0 = init0 - (eth0 ? address(this).balance : IERC20(token0).balanceOf(address(this)));
             out1 = init1 - (eth1 ? address(this).balance : IERC20(token1).balanceOf(address(this)));
         }
+
+        // record increase of incentive liquidity
+        incentiveLiquidity[IncentiveId.compute(key)] += liquidity;
+
         // refund - we sent params.amountDesired
         if (eth0) TransferHelper.safeTransferETH(msg.sender, msg.value - out0);
         else if (params.amount0Desired > out0) {
@@ -602,33 +631,42 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
         }
     }
 
+    // NEW
     function decreaseLiquidity(
         IncentiveKey memory key,
         INonfungiblePositionManager.DecreaseLiquidityParams calldata params
     ) external payable returns (uint256 amount0, uint256 amount1) {
         uint256 id = params.tokenId;
-        _unstake(key, id, msg.sender);
 
-        (, , address token0, address token1, , , , , , , , ) = nonfungiblePositionManager.positions(
-            id
+        Deposit memory deposit = deposits[id];
+        require(
+            deposit.owner == msg.sender,
+            'UniswapV3Staker::withdrawToken: only owner can decrease liquidity'
         );
 
-        (amount0, amount1) = nonfungiblePositionManager.decreaseLiquidity(params);
+        bytes32 incentiveId = IncentiveId.compute(key);
+
+        uint256 liq = params.liquidity;
+
+        // record loss of incentive liquidity
+        if (incentiveLiquidity[incentiveId] > liq) incentiveLiquidity[incentiveId] -= liq;
+        else incentiveLiquidity[incentiveId] = 0;
+
+        nonfungiblePositionManager.decreaseLiquidity(params);
 
         // Will not let you decrease the entire amount of liquidity, should just withdraw for that
         // checks that position liquidity != 0
-        (uint256 collect0, uint256 collect1) = nonfungiblePositionManager.collect(
-            INonfungiblePositionManager.CollectParams(id, address(0), MAX_UINT_128, MAX_UINT_128)
+        (amount0, amount1) = nonfungiblePositionManager.collect(
+            INonfungiblePositionManager.CollectParams(
+                id, // tokenId
+                msg.sender, // recipient
+                MAX_UINT_128, // amount0Max
+                MAX_UINT_128 // amount1Max
+            )
         );
-
-        if (token0 == address(WETH9)) nonfungiblePositionManager.unwrapWETH9(collect0, msg.sender);
-        else nonfungiblePositionManager.sweepToken(token0, collect0, msg.sender);
-        if (token1 == address(WETH9)) nonfungiblePositionManager.unwrapWETH9(collect1, msg.sender);
-        else nonfungiblePositionManager.sweepToken(token1, collect1, msg.sender);
-
-        _stakeToken(key, params.tokenId);
     }
 
+    // NEW
     function _checkAllowance(address token0, address token1) private {
         // tokens should never sit in here for more than a transaction, so we are ok approving max
         if ((IERC20(token0).allowance(address(this), address(nonfungiblePositionManager)) == 0)) {
