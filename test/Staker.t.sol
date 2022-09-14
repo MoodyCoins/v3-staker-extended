@@ -22,7 +22,7 @@ contract V3StakerExtendedTest is Test {
     address constant usdc = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address constant weth = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
 
-    // arbitrarily taken from a random deposit I saw on chain. The vlaues are not important.
+    // arbitrarily taken from a random deposit I saw on chain. The values are not important.
     // All we want is to mint a new token.
     int24 tickLower = 201240;
     int24 tickUpper = 203280;
