@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// see: https://github.com/Uniswap/v3-staker/blob/4328b957701de8bed83689aa22c32eda7928d5ab/contracts/UniswapV3Staker.sol
 
 pragma solidity =0.7.6;
 pragma abicoder v2;
@@ -48,7 +47,6 @@ contract V3StakerExtended is IUniswapV3Staker, IUniswapV3StakerExtended, Multica
         uint128 liquidityIfOverflow;
     }
 
-    // NEW
     /// @dev Used to increase and decrease liquidity while staked
     IWETH9 public immutable WETH9;
 
@@ -76,10 +74,8 @@ contract V3StakerExtended is IUniswapV3Staker, IUniswapV3StakerExtended, Multica
 
     /// @inheritdoc IUniswapV3StakerExtended
     mapping(address => uint256) public override numDeposits;
-
     /// @dev _userDeposits[user][index] => tokenId
     mapping(address => mapping(uint256 => uint256)) private _userDeposits;
-
     /// @dev _userDepositsIndex[tokenId] => index
     mapping(uint256 => uint256) private _userDepositsIndex;
 
@@ -131,14 +127,14 @@ contract V3StakerExtended is IUniswapV3Staker, IUniswapV3StakerExtended, Multica
         INonfungiblePositionManager _nonfungiblePositionManager,
         uint256 _maxIncentiveStartLeadTime,
         uint256 _maxIncentiveDuration,
-        address _weth
+        address _weth9
     ) {
         factory = _factory;
         nonfungiblePositionManager = _nonfungiblePositionManager;
         maxIncentiveStartLeadTime = _maxIncentiveStartLeadTime;
         maxIncentiveDuration = _maxIncentiveDuration;
 
-        WETH9 = IWETH9(_weth);
+        WETH9 = IWETH9(_weth9);
     }
 
     receive() external payable {
@@ -281,7 +277,7 @@ contract V3StakerExtended is IUniswapV3Staker, IUniswapV3StakerExtended, Multica
         });
         emit DepositTransferred(tokenId, address(0), from);
 
-        // NEW: record new deposit
+        // record new deposit
         _recordUserDeposit(from, tokenId);
 
         if (data.length > 0) {
@@ -664,7 +660,6 @@ contract V3StakerExtended is IUniswapV3Staker, IUniswapV3StakerExtended, Multica
     /// @dev Approves type(uint256).max since tokens should never sit in this contract for more
     /// than one call
     function _checkAllowance(address token0, address token1) private {
-        // tokens should never sit in here for more than a transaction, so we are ok approving max
         if ((IERC20(token0).allowance(address(this), address(nonfungiblePositionManager)) == 0)) {
             IERC20(token0).approve(address(nonfungiblePositionManager), type(uint256).max);
         }
