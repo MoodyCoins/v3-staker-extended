@@ -74,5 +74,5 @@ interface IUniswapV3StakerExtended {
     function decreaseLiquidity(
         IUniswapV3Staker.IncentiveKey memory key,
         INonfungiblePositionManager.DecreaseLiquidityParams calldata params
-    ) external payable returns (uint256 amount0, uint256 amount1);
+    ) external returns (uint256 amount0, uint256 amount1);
 }

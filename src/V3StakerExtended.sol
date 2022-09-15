@@ -613,7 +613,7 @@ contract V3StakerExtended is IUniswapV3Staker, IUniswapV3StakerExtended, Multica
     function decreaseLiquidity(
         IncentiveKey memory key,
         INonfungiblePositionManager.DecreaseLiquidityParams calldata params
-    ) external payable override returns (uint256 amount0, uint256 amount1) {
+    ) external override returns (uint256 amount0, uint256 amount1) {
         uint256 id = params.tokenId;
 
         _unstake(key, id, msg.sender);
