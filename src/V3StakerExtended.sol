@@ -186,38 +186,24 @@ contract V3StakerExtended is IUniswapV3Staker, IUniswapV3StakerExtended, Multica
     }
 
     /// @inheritdoc IUniswapV3StakerExtended
-    function alterIncentive(
-        IncentiveKey memory key,
-        uint256 tokenChange,
-        bool increase
-    ) external override onlyOwner {
+    function increaseIncentive(IncentiveKey memory key, uint256 tokenChange)
+        external
+        override
+        onlyOwner
+    {
         bytes32 incentiveId = IncentiveId.compute(key);
         Incentive storage incentive = incentives[incentiveId];
 
-        if (increase)
-            TransferHelperExtended.safeTransferFrom(
-                address(key.rewardToken),
-                msg.sender,
-                address(this),
-                tokenChange
-            );
+        TransferHelperExtended.safeTransferFrom(
+            address(key.rewardToken),
+            msg.sender,
+            address(this),
+            tokenChange
+        );
 
-        if (!increase) {
-            require(
-                incentive.totalRewardUnclaimed > tokenChange,
-                'UniswapV3Staker::alterIncentive: too much'
-            );
-            incentive.totalRewardUnclaimed -= tokenChange;
-        } else incentive.totalRewardUnclaimed += tokenChange;
+        incentive.totalRewardUnclaimed += tokenChange;
 
-        if (!increase)
-            TransferHelperExtended.safeTransfer(
-                address(key.rewardToken),
-                key.refundee,
-                tokenChange
-            );
-
-        emit IncentiveAltered(incentiveId, tokenChange, increase);
+        emit IncentiveAltered(incentiveId, tokenChange);
     }
 
     /// @inheritdoc IUniswapV3Staker

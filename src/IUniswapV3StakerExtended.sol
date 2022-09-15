@@ -8,9 +8,8 @@ import '@uniswap/v3-staker/contracts/interfaces/IUniswapV3Staker.sol';
 /// @title Extended Uniswap V3 Staker Interface
 interface IUniswapV3StakerExtended {
     /// @param incentiveId the id of the incentive
-    /// @param change the change in liquidity
-    /// @param increase was liquidity increased or decreased
-    event IncentiveAltered(bytes32 indexed incentiveId, uint256 change, bool increase);
+    /// @param increase the increase in liquidity
+    event IncentiveAltered(bytes32 indexed incentiveId, uint256 increase);
 
     /// @notice Get the liquidity for a given incentive
     /// @dev incentiveLiquidity[hashedIncentiveKey] => totalLiquidityStakedInIncentive
@@ -37,16 +36,12 @@ interface IUniswapV3StakerExtended {
     /// @return index The index of the tokenId
     function userDepositsIndex(uint256 tokenId) external view returns (uint256 index);
 
-    /// @notice Alter the amount of reward token for a given incentive
+    /// @notice Increase the amount of reward token for a given incentive
     /// @dev Warning: this will alter unclaimed stakes by the proportional percentage you change
     /// @param key The incentive key
     /// @param tokenChange The amount of incentive token to add (or remove) from the rewards
-    /// @param increase Are we increasing or decreasing the amount of rewards
-    function alterIncentive(
-        IUniswapV3Staker.IncentiveKey memory key,
-        uint256 tokenChange,
-        bool increase
-    ) external;
+    function increaseIncentive(IUniswapV3Staker.IncentiveKey memory key, uint256 tokenChange)
+        external;
 
     /// @notice Increase the liquidity of a staked V3 NFT position
     /// @param key The incentive key of the incentive the position is staked in
