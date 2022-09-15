@@ -48,12 +48,13 @@ function incentiveLiquidity(bytes32) public returns (uint)
 We can also change the total token incentives for a given incentive with:
 
 ```solidity
-function alterIncentive(
+function increaseIncentive(
     IncentiveKey memory key,
-    uint256 tokenChange,
-    bool increase
+    uint256 tokenChange
 ) external onlyOwner;
 ```
+
+**Note**: This function will alter currently unredeemed rewards by the proportional amount of change. For example, if there are currently 1000 tokens in the reward pool, and a user has a pending amount of 10 tokens. If we alter the incentive by 500 tokens (from 1000 to 1500), the users pending amount will proportionally increase to 15 tokens.
 
 ### Liquidity Management
 
