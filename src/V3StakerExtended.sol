@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // see: https://github.com/Uniswap/v3-staker/blob/4328b957701de8bed83689aa22c32eda7928d5ab/contracts/UniswapV3Staker.sol
 
-// Modified from uniswap
-// Search "NEW" for all changes
-
 pragma solidity =0.7.6;
 pragma abicoder v2;
 
@@ -21,11 +18,12 @@ import '@uniswap/v3-periphery/contracts/interfaces/INonfungiblePositionManager.s
 import '@uniswap/v3-periphery/contracts/NonfungiblePositionManager.sol';
 import '@uniswap/v3-periphery/contracts/base/Multicall.sol';
 
-// NEW: contract is ownable to allow for extra functionality
 import '@openzeppelin/contracts/access/Ownable.sol';
 
+import './IUniswapV3StakerExtended.sol';
+
 /// @title Extended Uniswap V3 staking interface
-contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
+contract V3StakerExtended is IUniswapV3Staker, IUniswapV3StakerExtended, Multicall, Ownable {
     uint128 constant MAX_UINT_128 = type(uint128).max;
 
     /// @notice Represents a staking incentive
@@ -73,28 +71,31 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
     /// @dev stakes[tokenId][incentiveHash] => Stake
     mapping(uint256 => mapping(bytes32 => Stake)) private _stakes;
 
-    // NEW
+    /// @inheritdoc IUniswapV3StakerExtended
+    mapping(bytes32 => uint256) public override incentiveLiquidity;
+
+    /// @inheritdoc IUniswapV3StakerExtended
+    mapping(address => uint256) public override numDeposits;
+
     /// @dev _userDeposits[user][index] => tokenId
     mapping(address => mapping(uint256 => uint256)) private _userDeposits;
 
-    // NEW
-    /// @dev numDeposits[user] => numberOfUserDeposits
-    mapping(address => uint256) public numDeposits;
-
-    // NEW
-    /// @dev userDepositsIndex[tokenId] => index
+    /// @dev _userDepositsIndex[tokenId] => index
     mapping(uint256 => uint256) private _userDepositsIndex;
 
-    // NEW
-    /// @dev incentiveLiquidity[hashedIncentiveKey] => totalLiquidityStakedInIncentive
-    mapping(bytes32 => uint256) public incentiveLiquidity;
-
-    function userDeposits(address user, uint256 index) public view returns (uint256 tokenId) {
+    /// @inheritdoc IUniswapV3StakerExtended
+    function userDeposits(address user, uint256 index)
+        external
+        view
+        override
+        returns (uint256 tokenId)
+    {
         require(index < numDeposits[user], 'UniswapV3StakerExtended: index OOB');
         return _userDeposits[user][index];
     }
 
-    function userDepositsIndex(uint256 tokenId) public view returns (uint256 index) {
+    /// @inheritdoc IUniswapV3StakerExtended
+    function userDepositsIndex(uint256 tokenId) external view override returns (uint256 index) {
         require(
             deposits[tokenId].owner != address(0),
             'UniswapV3StakerExtended: token not deposited'
@@ -120,12 +121,6 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
     /// @dev rewards[rewardToken][owner] => uint256
     /// @inheritdoc IUniswapV3Staker
     mapping(IERC20Minimal => mapping(address => uint256)) public override rewards;
-
-    // NEW: An incentive was altered
-    /// @param incentiveId the id of the incentive
-    /// @param change the change in liquidity
-    /// @param increase was liquidity increased or decreased
-    event IncentiveAltered(bytes32 indexed incentiveId, uint256 change, bool increase);
 
     /// @param _factory the Uniswap V3 factory
     /// @param _nonfungiblePositionManager the NFT position manager contract address
@@ -194,15 +189,12 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
         );
     }
 
-    // NEW
-    /// @dev Alter the unclaimed rewards in an incentive
-    /// @dev Warning: this will alter unclaimed stakes by the proportional percentage you change
-    /// totalRewardUnclaimed
+    /// @inheritdoc IUniswapV3StakerExtended
     function alterIncentive(
         IncentiveKey memory key,
-        uint256 change,
+        uint256 tokenChange,
         bool increase
-    ) external onlyOwner {
+    ) external override onlyOwner {
         bytes32 incentiveId = IncentiveId.compute(key);
         Incentive storage incentive = incentives[incentiveId];
 
@@ -211,19 +203,25 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
                 address(key.rewardToken),
                 msg.sender,
                 address(this),
-                change
+                tokenChange
             );
 
-        uint256 unclaimed = incentive.totalRewardUnclaimed;
         if (!increase) {
-            require(unclaimed > change, 'UniswapV3Staker::alterIncentive: too much');
-            incentive.totalRewardUnclaimed -= change;
-        } else incentive.totalRewardUnclaimed += change;
+            require(
+                incentive.totalRewardUnclaimed > tokenChange,
+                'UniswapV3Staker::alterIncentive: too much'
+            );
+            incentive.totalRewardUnclaimed -= tokenChange;
+        } else incentive.totalRewardUnclaimed += tokenChange;
 
         if (!increase)
-            TransferHelperExtended.safeTransfer(address(key.rewardToken), key.refundee, change);
+            TransferHelperExtended.safeTransfer(
+                address(key.rewardToken),
+                key.refundee,
+                tokenChange
+            );
 
-        emit IncentiveAltered(incentiveId, change, increase);
+        emit IncentiveAltered(incentiveId, tokenChange, increase);
     }
 
     /// @inheritdoc IUniswapV3Staker
@@ -308,10 +306,10 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
             'UniswapV3Staker::transferDeposit: can only be called by deposit owner'
         );
 
-        // NEW: Remove user token data
+        // remove user token data
         _deleteUserDeposit(msg.sender, tokenId);
 
-        // NEW: Record new deposit
+        // record new deposit
         _recordUserDeposit(to, tokenId);
 
         deposits[tokenId].owner = to;
@@ -338,7 +336,7 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
         delete deposits[tokenId];
         emit DepositTransferred(tokenId, deposit.owner, address(0));
 
-        // NEW: Remove user token data.
+        // remove user token data.
         _deleteUserDeposit(msg.sender, tokenId);
 
         nonfungiblePositionManager.safeTransferFrom(address(this), to, tokenId, data);
@@ -359,6 +357,9 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
         _unstake(key, tokenId, msg.sender);
     }
 
+    /// @dev Unstake implementation where we can specify the sender
+    /// which allows increaseLiquidity and removeLiquidity to unstake on
+    /// behalf of the msg.sender
     function _unstake(
         IncentiveKey memory key,
         uint256 tokenId,
@@ -410,7 +411,7 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
         // this only overflows if a token has a total supply greater than type(uint256).max
         rewards[key.rewardToken][deposit.owner] += reward;
 
-        // NEW: record loss of incentive liquidity
+        // record loss of incentive liquidity
         if (incentiveLiquidity[incentiveId] > liquidity) {
             incentiveLiquidity[incentiveId] -= liquidity;
         } else {
@@ -524,47 +525,20 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
             stake.liquidityNoOverflow = uint96(liquidity);
         }
 
-        // NEW: record increase in incentive liquidity
+        // record increase in incentive liquidity
         incentiveLiquidity[incentiveId] += liquidity;
 
         emit TokenStaked(tokenId, incentiveId, liquidity);
     }
 
-    // NEW
-    /// @dev Records a user deposit
-    function _recordUserDeposit(address account, uint256 tokenId) internal {
-        uint256 length = numDeposits[account];
-        _userDeposits[account][length] = tokenId;
-        _userDepositsIndex[tokenId] = length;
-        numDeposits[account]++;
-    }
-
-    // NEW
-    /// @dev Deletes records of a user deposit
-    function _deleteUserDeposit(address account, uint256 tokenId) internal {
-        uint256 lastTokenIndex = numDeposits[account] - 1;
-        uint256 tokenIndex = _userDepositsIndex[tokenId];
-
-        if (tokenIndex != lastTokenIndex) {
-            uint256 lastTokenId = _userDeposits[account][lastTokenIndex];
-            _userDeposits[account][tokenIndex] = lastTokenId;
-            _userDepositsIndex[lastTokenId] = tokenIndex;
-        }
-
-        numDeposits[account]--;
-
-        delete _userDepositsIndex[tokenId];
-        delete _userDeposits[account][lastTokenIndex];
-    }
-
-    // NEW
-    /// @dev Increase the liquidity of a currently staked NFT position
+    /// @inheritdoc IUniswapV3StakerExtended
     function increaseLiquidity(
         IncentiveKey memory key,
         INonfungiblePositionManager.IncreaseLiquidityParams calldata params
     )
         external
         payable
+        override
         returns (
             uint128 liquidity,
             uint256 amount0,
@@ -635,12 +609,11 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
         }
     }
 
-    // NEW
-    /// @dev Decrease the liquidity of a currently staked NFT position
+    /// @inheritdoc IUniswapV3StakerExtended
     function decreaseLiquidity(
         IncentiveKey memory key,
         INonfungiblePositionManager.DecreaseLiquidityParams calldata params
-    ) external payable returns (uint256 amount0, uint256 amount1) {
+    ) external payable override returns (uint256 amount0, uint256 amount1) {
         uint256 id = params.tokenId;
 
         _unstake(key, id, msg.sender);
@@ -661,8 +634,35 @@ contract V3StakerExtended is IUniswapV3Staker, Multicall, Ownable {
         _stakeToken(key, id);
     }
 
-    // NEW
-    /// @dev Checks if the given tokens have been authorized for use by the nftmanager
+    /// @dev Records a user deposit
+    function _recordUserDeposit(address account, uint256 tokenId) internal {
+        uint256 length = numDeposits[account];
+        _userDeposits[account][length] = tokenId;
+        _userDepositsIndex[tokenId] = length;
+        numDeposits[account]++;
+    }
+
+    /// @dev Deletes records of a user deposit
+    function _deleteUserDeposit(address account, uint256 tokenId) internal {
+        uint256 lastTokenIndex = numDeposits[account] - 1;
+        uint256 tokenIndex = _userDepositsIndex[tokenId];
+
+        if (tokenIndex != lastTokenIndex) {
+            uint256 lastTokenId = _userDeposits[account][lastTokenIndex];
+            _userDeposits[account][tokenIndex] = lastTokenId;
+            _userDepositsIndex[lastTokenId] = tokenIndex;
+        }
+
+        numDeposits[account]--;
+
+        delete _userDepositsIndex[tokenId];
+        delete _userDeposits[account][lastTokenIndex];
+    }
+
+    /// @dev Checks if the given tokens have been authorized for use by the nftmanager and
+    /// approves if necessary
+    /// @dev Approves type(uint256).max since tokens should never sit in this contract for more
+    /// than one call
     function _checkAllowance(address token0, address token1) private {
         // tokens should never sit in here for more than a transaction, so we are ok approving max
         if ((IERC20(token0).allowance(address(this), address(nonfungiblePositionManager)) == 0)) {
