@@ -8,8 +8,8 @@ import '@uniswap/v3-staker/contracts/interfaces/IUniswapV3Staker.sol';
 /// @title Extended Uniswap V3 Staker Interface
 interface IUniswapV3StakerExtended {
     /// @param incentiveId the id of the incentive
-    /// @param increase the increase in liquidity
-    event IncentiveAltered(bytes32 indexed incentiveId, uint256 increase);
+    /// @param amount the increase in liquidity
+    event IncentiveIncreased(bytes32 indexed incentiveId, uint256 amount);
 
     /// @notice Get the liquidity for a given incentive
     /// @dev incentiveLiquidity[hashedIncentiveKey] => totalLiquidityStakedInIncentive
