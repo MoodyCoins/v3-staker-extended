@@ -203,7 +203,7 @@ contract V3StakerExtended is IUniswapV3Staker, IUniswapV3StakerExtended, Multica
 
         incentive.totalRewardUnclaimed += tokenChange;
 
-        emit IncentiveAltered(incentiveId, tokenChange);
+        emit IncentiveIncreased(incentiveId, tokenChange);
     }
 
     /// @inheritdoc IUniswapV3Staker
